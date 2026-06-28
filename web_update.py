@@ -21,58 +21,108 @@ import re
 import statistics
 import urllib.request
 
-OPINET_URL = "https://www.opinet.co.kr/user/dopospdrg/dopOsPdrgSelect.do"
-PRICE_GO_URL = "https://www.price.go.kr/tprice/index.do"
+OPINET_BASE    = "https://www.opinet.co.kr"
+OPINET_URL     = OPINET_BASE + "/user/dopospdrg/dopOsPdrgSelect.do"
+_HIST_CSV_URL  = OPINET_BASE + "/user/doop/doopOilHistoryCsv.do"
+PRICE_GO_URL   = "https://www.price.go.kr/tprice/index.do"
 PROD = {"B027": "보통휘발유", "D047": "자동차용경유", "B034": "고급휘발유",
         "C004": "실내등유", "C042": "보일러등유"}
-_OBJ_RE = re.compile(r'\{[^{}]*"gb_nm":"[^"]+"[^{}]*\}')
+_OBJ_RE  = re.compile(r'\{[^{}]*"gb_nm":"[^"]+"[^{}]*\}')
 _DATE_RE = re.compile(r"(\d{4})년(\d{2})월(\d{2})일")
-_NUM_RE = re.compile(r"^-?\d[\d,]*$")
+_NUM_RE  = re.compile(r"^-?\d[\d,]*$")
+_HIST_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "Referer": OPINET_BASE + "/user/doop/doopOilHistory.do",
+}
+
+
+def _csv_post(params: dict, timeout: int = 15) -> bytes:
+    """doopOilHistoryCsv.do 에 POST 후 raw bytes 반환."""
+    data = urllib.parse.urlencode(params).encode()
+    req = urllib.request.Request(_HIST_CSV_URL, data=data, headers=_HIST_HEADERS)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return r.read()
+
+
+def _decode_csv(raw: bytes) -> list[list[str]]:
+    """EUC-KR CSV bytes → [[col, ...], ...] (헤더 포함)."""
+    text = raw.decode("euc-kr", errors="replace")
+    rows = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            rows.append([c.strip() for c in line.split(",")])
+    return rows
+
+
+def fetch_opinet_monthly_csv(year_from: int, month_from: int,
+                             year_to: int, month_to: int,
+                             fuel_code: str = "B027") -> list[dict]:
+    """오피넷 月별 전국 평균가 CSV 수집.
+
+    반환: [{"ym": "YYYY-MM", "보통휘발유": float, ...}, ...]
+    오피넷은 완성된 월만 반환하므로 진행 중인 당월은 포함되지 않는다.
+    """
+    params = {
+        "TERM": "M",
+        "STA_Y": str(year_from), "STA_M": f"{month_from:02d}",
+        "END_Y": str(year_to),   "END_M": f"{month_to:02d}",
+        f"OIL_CD_{fuel_code}_P": "Y",
+    }
+    rows = _decode_csv(_csv_post(params))
+    # 행 형식: ["2026년01월", "1704.38"]
+    _YM_RE = re.compile(r"(\d{4})년(\d{2})월")
+    out = []
+    for row in rows[1:]:  # 헤더 건너뜀
+        if len(row) < 2:
+            continue
+        m = _YM_RE.match(row[0])
+        if not m:
+            continue
+        try:
+            ym = f"{m.group(1)}-{m.group(2)}"
+            out.append({"ym": ym, PROD.get(fuel_code, fuel_code): float(row[1])})
+        except ValueError:
+            continue
+    return out
+
+
+def fetch_opinet_weekly_csv(year: int, month: int,
+                            fuel_code: str = "B027") -> list[dict]:
+    """오피넷 週별 전국 평균가 CSV 수집 (당월 진행 중 데이터 포함).
+
+    반환: [{"ym": "YYYY-MM", "week": int, "보통휘발유": float}, ...]
+    """
+    params = {
+        "TERM": "W",
+        "STA_Y": str(year), "STA_M": f"{month:02d}", "STA_W": "1",
+        "END_Y": str(year), "END_M": f"{month:02d}", "END_W": "5",
+        f"OIL_CD_{fuel_code}_P": "Y",
+    }
+    rows = _decode_csv(_csv_post(params))
+    # 행 형식: ["2026년06월1주", "2010.40"]
+    _WK_RE = re.compile(r"(\d{4})년(\d{2})월(\d+)주")
+    out = []
+    for row in rows[1:]:
+        if len(row) < 2:
+            continue
+        m = _WK_RE.match(row[0])
+        if not m:
+            continue
+        try:
+            ym = f"{m.group(1)}-{m.group(2)}"
+            out.append({"ym": ym, "week": int(m.group(3)),
+                        PROD.get(fuel_code, fuel_code): float(row[1])})
+        except ValueError:
+            continue
+    return out
 
 
 def _fetch_html(timeout: int = 15) -> str:
     req = urllib.request.Request(OPINET_URL, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="replace")
-
-
-def _fetch_html_month(year: int, month: int, timeout: int = 20) -> str:
-    """당월 일별 데이터를 얻기 위해 POST date-range 파라미터를 순차 시도.
-
-    오피넷 기본 GET은 최근 2일치만 반환하므로, 여러 POST 파라미터 형식을 시도해
-    더 많은 일별 데이터를 수집한다. 모두 실패하면 기본 GET으로 폴백.
-    """
-    last_day = calendar.monthrange(year, month)[1]
-    s_dash = f"{year}-{month:02d}-01"
-    e_dash = f"{year}-{month:02d}-{last_day:02d}"
-    s_flat = s_dash.replace("-", "")
-    e_flat = e_dash.replace("-", "")
-
-    candidates = [
-        {"startDt": s_flat, "endDt": e_flat},
-        {"s_startDt": s_dash, "s_endDt": e_dash},
-        {"TERM": "M", "PRODCD": "B027"},
-        {"startDt": s_flat, "endDt": e_flat, "prodcd": "B027", "area": "0"},
-    ]
-    for params in candidates:
-        try:
-            data = urllib.parse.urlencode(params).encode()
-            req = urllib.request.Request(
-                OPINET_URL, data=data,
-                headers={
-                    "User-Agent": "Mozilla/5.0",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": OPINET_URL,
-                }
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                html = r.read().decode("utf-8", errors="replace")
-            recs = parse_opinet(html)
-            if len(recs) > 3:
-                return html
-        except Exception:
-            continue
-    return _fetch_html(timeout)
 
 
 def parse_opinet(html: str) -> list[dict]:
@@ -97,31 +147,82 @@ def parse_opinet(html: str) -> list[dict]:
     return [uniq[d] for d in sorted(uniq)]
 
 
-def fetch_opinet() -> list[dict]:
-    """오피넷 전국 평균 판매가 수집(무키) — 당월 데이터 우선, 기본 GET 폴백."""
+def fetch_opinet() -> dict:
+    """오피넷 전국 평균 판매가 수집 (무키).
+
+    반환 dict:
+      "cur":  {"ym", "avg", "n_weeks", "source", "fuel"}  — 당월 주간평균
+      "prev": {"ym", "avg", "source", "fuel"}             — 전월 월평균 (완성)
+      "raw_daily": list[dict]                              — 기존 일별 GET 결과 (폴백용)
+    """
     today = date.today()
-    recs = parse_opinet(_fetch_html_month(today.year, today.month))
-    if not recs:
-        recs = parse_opinet(_fetch_html())
-    if not recs:
-        raise RuntimeError("오피넷 파싱 실패 — 페이지 구조가 변경되었을 수 있음.")
-    return recs
+    y, m = today.year, today.month
+    prev_y, prev_m = (y, m - 1) if m > 1 else (y - 1, 12)
+    fuel = "보통휘발유"
+    result: dict = {"cur": None, "prev": None, "raw_daily": []}
 
+    # 1) 당월 주별 CSV
+    try:
+        wks = fetch_opinet_weekly_csv(y, m)
+        if wks:
+            vals = [w[fuel] for w in wks if fuel in w]
+            if vals:
+                result["cur"] = {
+                    "ym": f"{y}-{m:02d}",
+                    "avg": round(statistics.mean(vals), 2),
+                    "n_weeks": len(vals),
+                    "weeks": wks,
+                    "source": "주별CSV",
+                    "fuel": fuel,
+                }
+    except Exception:
+        pass
 
-def fetch_opinet_month(year: int, month: int) -> list[dict]:
-    """오피넷 특정 월 일별 데이터 수집. 해당 월 레코드만 반환."""
-    ym = f"{year}-{month:02d}"
-    recs = parse_opinet(_fetch_html_month(year, month))
-    return [r for r in recs if r["date"].startswith(ym)]
+    # 2) 전월 및 올해 월별 CSV
+    try:
+        monthly = fetch_opinet_monthly_csv(y, 1, y, m)
+        result["monthly_series"] = monthly
+        prev_ym = f"{prev_y}-{prev_m:02d}"
+        for row in monthly:
+            if row["ym"] == prev_ym and fuel in row:
+                result["prev"] = {
+                    "ym": prev_ym,
+                    "avg": row[fuel],
+                    "source": "월별CSV",
+                    "fuel": fuel,
+                }
+                break
+    except Exception:
+        pass
+
+    # 3) 일별 GET (폴백 — 구 방식 호환)
+    try:
+        result["raw_daily"] = parse_opinet(_fetch_html())
+    except Exception:
+        pass
+
+    # cur가 없으면 raw_daily로 대체
+    if result["cur"] is None and result["raw_daily"]:
+        recs = result["raw_daily"]
+        cur_ym = recs[-1]["date"][:7]
+        pts = [r[fuel] for r in recs if fuel in r and r["date"].startswith(cur_ym)]
+        if pts:
+            result["cur"] = {
+                "ym": cur_ym,
+                "avg": round(statistics.mean(pts), 2),
+                "n_weeks": None,
+                "source": f"일별GET({len(pts)}일)",
+                "fuel": fuel,
+            }
+
+    if result["cur"] is None and result["prev"] is None:
+        raise RuntimeError("오피넷 수집 실패 — 페이지 구조 변경 가능")
+    return result
 
 
 def gasoline_monthly_avg(recs: list[dict], ym: str | None = None,
                          fuel: str = "보통휘발유") -> dict | None:
-    """수집된 일별 레코드에서 특정 월(YYYY-MM)의 평균가 산출.
-
-    ym 미지정 시 recs 내 가장 최근 월을 사용한다.
-    CPI 석유류 MoM 기준: 당월 일별 평균 / 전월 일별 평균 − 1.
-    """
+    """수집된 일별 레코드에서 특정 월(YYYY-MM)의 평균가 산출 (하위 호환용)."""
     if not recs:
         return None
     if ym is None:

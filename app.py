@@ -113,23 +113,29 @@ else:
             st.session_state["opinet"] = fetch_opinet()
         except Exception as e:
             st.error(f"오피넷 수집 실패: {e}")
-    recs = st.session_state.get("opinet")
-    if recs:
-        cur_ym = recs[-1]["date"][:7]
-        mavg = gasoline_monthly_avg(recs, ym=cur_ym)
-        if mavg:
+    opinet_data = st.session_state.get("opinet")
+    if opinet_data:
+        cur  = opinet_data.get("cur")
+        prev = opinet_data.get("prev")
+        if cur:
+            src_label = f"{cur['n_weeks']}주 평균" if cur.get("n_weeks") else cur.get("source", "")
             oc2.success(
-                f"오피넷 **{mavg['ym']} 당월 평균** 보통휘발유 **{mavg['avg']}원/L** "
-                f"({mavg['n_days']}일 평균 · {mavg['first_date']}~{mavg['last_date']})"
+                f"오피넷 **{cur['ym']} 당월 평균** 보통휘발유 **{cur['avg']}원/L** "
+                f"({src_label} · {cur['source']})"
             )
-            base_oil = oc2.number_input(
-                "전월 오피넷 보통휘발유 평균(원/L)", value=2009.08, step=1.0,
-                help="전월 일별 평균가 입력 → 석유류 MoM = 당월평균 / 전월평균 − 1")
+            # 전월 평균 — 자동수집 우선, 없으면 수동 입력
+            if prev:
+                oc2.info(f"전월({prev['ym']}) 평균: **{prev['avg']}원/L** (오피넷 월별CSV 자동수집)")
+                base_oil = prev["avg"]
+            else:
+                base_oil = oc2.number_input(
+                    "전월 오피넷 보통휘발유 평균(원/L)", value=2009.08, step=1.0,
+                    help="전월 월별 평균가 — 오피넷 CSV 자동수집 실패 시 수동 입력")
             if base_oil:
-                seokyu_default = round((mavg["avg"] / base_oil - 1) * 100, 2)
+                seokyu_default = round((cur["avg"] / base_oil - 1) * 100, 2)
                 oc2.caption(
                     f"→ 석유류 MoM 자동 제안 **{seokyu_default:+.2f}%** "
-                    f"(당월평균 {mavg['avg']} / 전월평균 {base_oil})"
+                    f"(당월 {cur['avg']} / 전월 {base_oil})"
                 )
 
     # 참가격 생필품 주간정보 → 생필품 관련 버킷 MoM 보조 제안
