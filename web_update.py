@@ -363,9 +363,21 @@ def parse_life_prices(html: str) -> list[LifePrice]:
 
 def fetch_life_prices() -> list[LifePrice]:
     """한국소비자원 참가격 생필품 주간정보 수집(무키)."""
-    req = urllib.request.Request(PRICE_GO_URL, headers={"User-Agent": "Mozilla/5.0"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        html = r.read().decode("utf-8", errors="replace")
+    _headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+    }
+    try:
+        import requests as _req
+        resp = _req.get(PRICE_GO_URL, headers=_headers, timeout=20)
+        resp.encoding = "utf-8"
+        html = resp.text
+    except ImportError:
+        req = urllib.request.Request(PRICE_GO_URL, headers=_headers)
+        with urllib.request.urlopen(req, timeout=20) as r:
+            html = r.read().decode("utf-8", errors="replace")
     recs = parse_life_prices(html)
     if not recs:
         raise RuntimeError("참가격 생필품 주간정보 파싱 실패 — 페이지 구조가 변경되었을 수 있음.")

@@ -211,8 +211,8 @@ else:
             if base_oil:
                 seokyu_default = round((opinet_cur["avg"] / base_oil - 1) * 100, 2)
                 oc2.caption(
-                    f"→ 석유류 MoM 자동 제안 **{seokyu_default:+.2f}%** "
-                    f"(당월 {opinet_cur['avg']} / 전월 {base_oil})"
+                    f"→ 석유류 MoM 자동 제안: **{seokyu_default:+.2f}%** "
+                    f"(당월평균 {opinet_cur['avg']:,.0f}원/L, 전월평균 {base_oil:,.0f}원/L)"
                 )
 
     # 참가격 생필품 주간정보 → 생필품 관련 버킷 MoM 보조 제안
