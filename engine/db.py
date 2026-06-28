@@ -43,6 +43,25 @@ def published_core_sum(con) -> dict:
     return {r["key"]: r["value"] for r in rows}
 
 
+def load_app_state(con) -> dict:
+    try:
+        rows = con.execute("SELECT key, value FROM app_state").fetchall()
+        return {r["key"]: r["value"] for r in rows}
+    except Exception:
+        return {}
+
+
+def save_app_state(con, state: dict):
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)"
+    )
+    for k, v in state.items():
+        con.execute(
+            "INSERT OR REPLACE INTO app_state(key, value) VALUES (?, ?)", (k, str(v))
+        )
+    con.commit()
+
+
 def insert_event(con, ym, name, target_bucket, target_weight, shock_pct,
                  lag_months=0.0, reversal_rate=0.0, importance=None,
                  direction=None, reason="") -> bool:

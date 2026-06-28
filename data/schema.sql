@@ -75,3 +75,10 @@ CREATE TABLE IF NOT EXISTS backtest (
     cause           TEXT,                      -- MoM오판/기저/이벤트 (R-2)
     corrected       INTEGER DEFAULT 0
 );
+
+-- 6) 앱 입력 저장 상태 — 세션 간 입력값 유지
+-- ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS app_state (
+    key   TEXT PRIMARY KEY,
+    value TEXT
+);

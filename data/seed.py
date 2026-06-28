@@ -155,6 +155,8 @@ def build(db_path: Path = DB_PATH) -> None:
     con.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value REAL)")
     con.executemany("INSERT OR REPLACE INTO meta(key,value) VALUES (?,?)",
                     list(PUBLISHED_CORE_WEIGHT.items()))
+    # 앱 입력 저장 상태 테이블 (세션 간 입력 유지)
+    con.execute("CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT)")
 
     con.commit()
 
