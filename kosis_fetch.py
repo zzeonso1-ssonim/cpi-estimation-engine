@@ -33,10 +33,17 @@ SERIES = [
 
 
 def load_api_key() -> str | None:
-    """환경변수 → .env 순으로 KOSIS_API_KEY 탐색."""
+    """환경변수 → st.secrets → .env 순으로 KOSIS_API_KEY 탐색."""
     key = os.environ.get("KOSIS_API_KEY")
     if key:
         return key.strip()
+    try:
+        import streamlit as st
+        key = st.secrets.get("KOSIS_API_KEY")
+        if key:
+            return str(key).strip()
+    except Exception:
+        pass
     if ENV_PATH.exists():
         for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
             line = line.strip()
