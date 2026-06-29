@@ -31,14 +31,25 @@ st.set_page_config(page_title="소비자물가 추정 엔진", layout="wide")
 st.title("📊 소비자물가 추정 엔진 v0.1")
 st.caption("PRD v3.1 기반 · 채권전략용 재현 가능한 CPI 전망 · 지수법 우선(§5.1) · 재현 게이트(검증6·7) 통과 시에만 발행")
 
+def _need_reseed() -> bool:
+    try:
+        c = connect()
+        n = c.execute("SELECT COUNT(*) FROM monthly_index").fetchone()[0]
+        c.close()
+        return n < 12  # 2025-06~2026-05 전체가 있어야 탭2 동작
+    except Exception:
+        return True
+
+if _need_reseed():
+    import subprocess
+    with st.spinner("DB 초기화 중…"):
+        subprocess.run([sys.executable, "data/seed.py"], check=True)
+
 try:
     con = connect()
 except FileNotFoundError:
-    # 클라우드 최초 실행 등 DB 없을 때 자동 초기화
-    import subprocess
-    with st.spinner("DB 초기화 중 (최초 실행)…"):
-        subprocess.run([sys.executable, "data/seed.py"], check=True)
-    con = connect()
+    st.error("DB 생성 실패 — 관리자에게 문의하세요.")
+    st.stop()
 
 buckets = load_buckets(con)
 published = published_core_sum(con)
