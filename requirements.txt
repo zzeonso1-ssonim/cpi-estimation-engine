@@ -1,5 +1,6 @@
 streamlit>=1.40
 pandas>=2.2
+plotly>=5.0
 # requests는 KOSIS OpenAPI 수집(kosis_fetch.py)에서만 필요 — 키 발급 후 사용
 requests>=2.31
 # pdfplumber는 가중치 보도자료 PDF에서 458품목 가중치 추출 시 1회 사용(data 갱신용)
